@@ -7277,3 +7277,8 @@
   background: currentColor;
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
 }
+/* perf: 屏幕外的消息不参与排版与绘制，降低打字时的重排成本 */
+.chat-msg-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
