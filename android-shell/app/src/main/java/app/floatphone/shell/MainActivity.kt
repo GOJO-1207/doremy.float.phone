@@ -58,6 +58,74 @@ class MainActivity : AppCompatActivity() {
         val VERSION: String = BuildConfig.VERSION_NAME
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
+
+        /**
+         * 拦截网页的 blob 导出：WebView 的 DownloadListener 只能拿到 blob: 地址，
+         * 读不到内容。这里把对象截获下来，分片转 base64 过 JS 桥，由原生写进「下载」目录。
+         * 与 11-14 版原版壳的 __floatBlobSaveByUrl 同一套机制：插件、第三方页面
+         * 只要用 a[download] + blob URL，就都能落盘，不必各自改代码。
+         */
+        val BLOB_SAVER_JS = """
+        (function(){
+          if (window.__floatBlobSaver) return;
+          window.__floatBlobSaver = true;
+          if (!window.AndroidShell || !window.AndroidShell.beginBlobSave) return;
+          var map = new Map();
+          var orig = URL.createObjectURL;
+          URL.createObjectURL = function(o){
+            var u = orig.call(URL, o);
+            try { if (o instanceof Blob) map.set(u, o); } catch(e) {}
+            return u;
+          };
+          function toB64(b){
+            return new Promise(function(res, rej){
+              var fr = new FileReader();
+              fr.onload = function(){ var s = String(fr.result); res(s.slice(s.indexOf(',') + 1)); };
+              fr.onerror = rej;
+              fr.readAsDataURL(b);
+            });
+          }
+          function save(blob, name){
+            var id = AndroidShell.beginBlobSave(name || 'download.bin', blob.type || 'application/octet-stream');
+            if (!id) return;
+            var CH = 1024 * 1024;
+            var off = 0;
+            function step(){
+              if (off >= blob.size) { AndroidShell.finishBlobSave(id); return; }
+              var part = blob.slice(off, off + CH);
+              off += CH;
+              toB64(part).then(function(b64){
+                AndroidShell.appendBlobChunk(id, b64);
+                step();
+              }).catch(function(){
+                AndroidShell.finishBlobSave(id);
+              });
+            }
+            step();
+          }
+          window.__floatBlobSaveByUrl = function(u, n){
+            var b = map.get(u);
+            if (b) save(b, n || 'download.bin');
+          };
+          // 捕获阶段先于页面自己的 click 处理，避免被 preventDefault/revoke 影响
+          document.addEventListener('click', function(e){
+            var a = e.target && e.target.closest ? e.target.closest('a[download]') : null;
+            if (!a) return;
+            var href = a.href || '';
+            if (href.slice(0, 5) !== 'blob:') return;
+            var blob = map.get(href);
+            if (!blob) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            var name = a.download || '';
+            if (!name && window.AndroidShell && AndroidShell.getPendingDownloadName) {
+              try { name = AndroidShell.getPendingDownloadName() || ''; } catch (e) {}
+            }
+            save(blob, name || 'download.bin');
+          }, true);
+        })();
+        """
         /** 外部 App（如桌宠）唤起本壳用的自定义 scheme：floatshell://open?url=<站内地址> */
         const val DEEP_LINK_SCHEME = "floatshell"
         /**
@@ -71,6 +139,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rootContainer: FrameLayout
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /** 页面通过 Android.captureDownloadName 声明的下载文件名（blob 下载拿不到名字时要靠它）。 */
+    @Volatile
+    private var pendingDownloadName: String = ""
+
+    /** 进行中的 blob 落盘会话：id → 输出流。由 ShellBridge 的 begin/append/finish 三步驱动。 */
+    private val blobSaveSessions = java.util.HashMap<String, BlobSaveSession>()
 
     /** 系统状态栏实际高度（CSS px，即物理像素 / density），实时更新。 */
     @Volatile
@@ -309,6 +384,11 @@ class MainActivity : AppCompatActivity() {
         ShellBus.webView = webView
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                // blob 导出拦截脚本：页面每次加载完注入一次；注入后同文档内的路由切换仍有效
+                runCatching { view.evaluateJavascript(BLOB_SAVER_JS, null) }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 val scheme = url.scheme ?: return false
@@ -362,8 +442,16 @@ class MainActivity : AppCompatActivity() {
         // 备份导出等下载：交给系统下载管理器，落到公共下载目录
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             runCatching {
-                if (url.startsWith("blob:") || url.startsWith("data:")) {
-                    // blob/data 由页面内 JS 触发的 a[download] 处理；提示用户等待
+                if (url.startsWith("blob:")) {
+                    // 页面没走 a[download]（例如 location 跳转触发下载）时，
+                    // 由注入脚本按 URL 找回 blob 对象，再分片写进「下载」目录。
+                    val name = pendingDownloadName.ifBlank { "download.bin" }
+                    val js = "window.__floatBlobSaveByUrl && window.__floatBlobSaveByUrl(" +
+                        org.json.JSONObject.quote(url) + "," + org.json.JSONObject.quote(name) + ");"
+                    webView.evaluateJavascript(js, null)
+                    return@DownloadListener
+                }
+                if (url.startsWith("data:")) {
                     Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
                     return@DownloadListener
                 }
@@ -1300,6 +1388,88 @@ class MainActivity : AppCompatActivity() {
         }.getOrDefault(false)
 
         /**
+         * blob 落盘第一步：在「下载」目录开一个输出流，返回会话 id。
+         * Android 10+ 走 MediaStore（先标记 IS_PENDING，收尾再放开，避免文件管理器看到半成品）；
+         * 8/9 直接写公共目录。名字沿用 safeDownloadName 的清洗规则，防路径穿越。
+         */
+        @JavascriptInterface
+        fun beginBlobSave(name: String, mime: String): String = runCatching {
+            val safeName = safeDownloadName(name.ifBlank { "download.bin" })
+            val safeMime = mime.ifBlank { guessMimeType(safeName) }
+            val id = java.util.UUID.randomUUID().toString()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(MediaStore.Downloads.MIME_TYPE, safeMime)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return@runCatching ""
+                val out = contentResolver.openOutputStream(uri) ?: return@runCatching ""
+                blobSaveSessions[id] = BlobSaveSession(out, uri, safeName)
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!dir.exists()) dir.mkdirs()
+                blobSaveSessions[id] = BlobSaveSession(FileOutputStream(java.io.File(dir, safeName)), null, safeName)
+            }
+            id
+        }.getOrDefault("")
+
+        /** blob 落盘第二步：追加一片 base64（网页侧按 1 MB 切片）。 */
+        @JavascriptInterface
+        fun appendBlobChunk(id: String, base64: String) {
+            val session = blobSaveSessions[id] ?: return
+            runCatching {
+                val bytes = Base64.decode(base64, Base64.DEFAULT)
+                session.out.write(bytes)
+                session.bytes += bytes.size
+            }
+        }
+
+        /** blob 落盘第三步：收尾、放开 IS_PENDING，并给出保存结果提示。 */
+        @JavascriptInterface
+        fun finishBlobSave(id: String): String {
+            val session = blobSaveSessions.remove(id) ?: return ""
+            runCatching {
+                session.out.flush()
+                session.out.close()
+                val uri = session.uri
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri != null) {
+                    contentResolver.update(
+                        uri,
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null,
+                        null,
+                    )
+                }
+            }
+            val sizeText = if (session.bytes >= 1L shl 20) {
+                String.format("%.1f MB", session.bytes / 1048576.0)
+            } else {
+                "${session.bytes / 1024} KB"
+            }
+            runOnUiThread {
+                Toast.makeText(
+                    this@MainActivity,
+                    if (session.bytes > 0) "已保存到「下载」目录：${session.name}（$sizeText）" else "导出失败：没有写入任何内容",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return session.name
+        }
+
+        /** 页面通过 Android.captureDownloadName 预声明的文件名（blob 下载拿不到名字时用）。 */
+        @JavascriptInterface
+        fun getPendingDownloadName(): String = pendingDownloadName
+
+        /** 声明「接下来这次下载叫什么」。只影响文件名，不触发下载。 */
+        @JavascriptInterface
+        fun captureDownloadName(name: String) {
+            pendingDownloadName = name.orEmpty()
+        }
+
+        /**
          * 打开另一个 App（桌宠联动用）。给出目标包名；可选的 dataUrl 会作为
          * Intent.data 带上（对方 Activity 的 intent-filter 能收到）。
          * 返回是否成功发起跳转——目标未安装时返回 false，页面据此提示。
@@ -1459,5 +1629,14 @@ class MainActivity : AppCompatActivity() {
             PhoneWidgetProvider.requestPin(this@MainActivity)
             true
         }.getOrDefault(false)
+    }
+
+    /** blob 分片落盘的会话：一条输出流 + 已写字节数。收尾后从 blobSaveSessions 移除。 */
+    private class BlobSaveSession(
+        val out: java.io.OutputStream,
+        val uri: Uri?,
+        val name: String,
+    ) {
+        var bytes: Long = 0
     }
 }
