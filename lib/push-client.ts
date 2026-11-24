@@ -11,6 +11,19 @@ import {
 
 export type OfflinePushState = "unsupported" | "off" | "on";
 
+/**
+ * 推送通道该走哪一边：站点自带库，还是用户个人云。
+ *
+ * 壳（FloatShell App）只有一条通道：PushService 长连接 + 站点库里的
+ * `shell:<账号 id>` 订阅。个人云那套是浏览器 Web Push（Service Worker），
+ * 壳里根本没有对应实现——一旦在壳里把查询/测试路由到个人云，那边永远查不到
+ * 订阅，界面就一直显示「请先开启离线推送」，而用户怎么点都点不动。
+ * 所以壳环境一律走站点通道，浏览器才按个人云是否激活决定。
+ */
+function useSitePushChannel(): boolean {
+    return isShellEnvironment() || !isPersonalPushCloudActive();
+}
+
 // ── 订阅门控：账号没有任何推送订阅时，兜底预约/心跳完全不发起，不产生任何请求 ──
 
 const PUSH_GATE_KV = "push_account_subscribed_v1";
@@ -91,9 +104,9 @@ export async function hasAccountPushSubscription(): Promise<boolean> {
         // fall through to refetch
     }
     try {
-        const response = isPersonalPushCloudActive()
-            ? await personalPushFetch("status")
-            : await fetch("/api/push/status", { credentials: "include" });
+        const response = useSitePushChannel()
+            ? await fetch("/api/push/status", { credentials: "include" })
+            : await personalPushFetch("status");
         if (!response.ok) return false;
         const data = await response.json().catch(() => ({})) as { ok?: boolean; subscribed?: boolean };
         const subscribed = data.ok === true && data.subscribed === true;
@@ -409,9 +422,9 @@ export async function disableOfflinePush(): Promise<{ ok: boolean; error?: strin
 }
 
 export async function sendTestOfflinePush(): Promise<{ ok: boolean; error?: string }> {
-    const response = await (isPersonalPushCloudActive()
-        ? personalPushFetch("test", { method: "POST" })
-        : fetch("/api/push/test", { method: "POST", credentials: "include"}))
+    const response = await (useSitePushChannel()
+        ? fetch("/api/push/test", { method: "POST", credentials: "include"})
+        : personalPushFetch("test", { method: "POST" }))
         .catch(() => null);
     if (!response) return { ok: false, error: "网络异常。" };
     const data = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
