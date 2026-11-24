@@ -9,6 +9,7 @@ import {
   readHealthCapabilities,
   readHealthDiagnostics,
   readLocation,
+  readLocationCapabilities,
   readLocationDiagnostics,
   readNativeCapabilities,
   readSleep,
@@ -102,6 +103,11 @@ export function buildCapabilityRows(): CapabilityRow[] {
   // 睡眠的前置条件在健康桥那边（装没装 Health Connect、授没授权），
   // 不在感知桥的能力表里，所以单独读一次。
   const health = readHealthCapabilities();
+  // 定位的授权态同样不在感知桥里——感知桥只回答「这个壳支不支持位置」，
+  // 授没授权、系统定位开关开没开在位置桥（getLocationCapabilities）。
+  // 之前误从 native.locationGranted 读（感知桥从不填这个字段），结果永远
+  // 拿到 undefined，面板于是恒显示「需要位置权限」，与真实授权无关。
+  const locationCaps = readLocationCapabilities();
 
   const ids: PerceptionCapability[] = [
     "battery", "network", "foregroundApp", "steps", "location", "sleep", "calendar", "contacts", "usageStats", "returnToPhone", "lifeRhythm",
@@ -128,9 +134,12 @@ export function buildCapabilityRows(): CapabilityRow[] {
     // 定位：两层前置，且必须分开报——「权限给了但定位开关关着」是最容易
     // 被漏掉的一种（用户会以为权限都给了怎么还读不到）。
     if (id === "location" && nativeSupported) {
-      if (native.locationGranted !== true) {
+      // 位置桥优先；老壳没有 getLocationCapabilities 时退回感知桥字段（可能为空）。
+      const granted = locationCaps.locationGranted ?? native.locationGranted;
+      const serviceOn = locationCaps.locationServiceOn ?? native.locationServiceOn;
+      if (granted !== true) {
         missingRequirement = "需要位置权限";
-      } else if (native.locationServiceOn !== true) {
+      } else if (serviceOn !== true) {
         missingRequirement = "系统定位开关没开";
       }
     }

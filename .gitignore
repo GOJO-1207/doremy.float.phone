@@ -28,3 +28,8 @@ tools/weixin-local-assistant/config.txt
 *.ts.net.crt
 *.ts.net.key
 /public/models/world-builder/
+
+# Android 构建产物与本地配置（不进仓库）
+android-shell/.gradle/
+android-shell/app/build/
+android-shell/local.properties

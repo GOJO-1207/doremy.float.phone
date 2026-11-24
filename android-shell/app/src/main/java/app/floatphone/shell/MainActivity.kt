@@ -258,6 +258,11 @@ class MainActivity : AppCompatActivity() {
         // 不设的话短音频没在播时按键调的是铃声，用户感觉"音量键无效、声音巨大"
         volumeControlStream = AudioManager.STREAM_MUSIC
 
+        // 数据保护：WebView 打开之前先检查本地 IndexedDB 是否为空库、有没有可回滚
+        // 的快照；随后在后台线程做一次增量快照。必须早于 WebView 初始化，否则
+        // Chromium 已经打开 LevelDB，复制出来的可能是一份正在写的半成品。
+        IdbSnapshot.prepareBeforeWebView(this)
+
         // 外层容器：decorFits=false 后系统不再替 App 避让键盘，由容器底部内边距
         // 把键盘高度让出来（WebView 随之变矮），网页收到 resize 后输入栏自动上移。
         webView = WebView(this)
