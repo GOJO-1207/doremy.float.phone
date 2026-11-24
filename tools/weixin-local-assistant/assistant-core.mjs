@@ -37,7 +37,9 @@ const PENDING_RECONCILE_INTERVAL_MS = 30 * 60 * 1000;
 
 // 运行包体积可达 MB 级（含提示词模板、贴纸与参考图 base64），不能每轮全量
 // 下载。索引条目的 updatedAt 随小手机每次同步更新，作为缓存失效依据；TTL 兜底。
-const RUNTIME_PACKAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+// 2026-11-24：TTL 10 分钟 → 60 分钟（运行包往往两周才变一次），配合生产者侧
+// 的 gzip 上传把每分钟一次的运行包出网量压下来。
+const RUNTIME_PACKAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 const runtimePackageCache = new Map();
 
 // 单轮回复的截止时间（云端由 pollOnce options.deadlineAt 下发；本地 CLI 无限制）。
@@ -2059,7 +2061,16 @@ async function getObjectJson(env, path) {
   const res = await fetch(storageObjectUrl(env, path), { headers: supabaseHeaders(env), cache: "no-store" });
   if (res.status === 404) throw new Error(`object_not_found:${path}`);
   if (!res.ok) throw new Error(`Supabase GET ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  return res.json();
+  const buf = new Uint8Array(await res.arrayBuffer());
+  // 运行包自 2026-11-24 起改为 gzip 上传（出网流量按压缩字节计）。按魔数判断，
+  // 旧版明文对象仍能直接读，两个版本的写入方可以并存。
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    const text = await new Response(
+      new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+    return JSON.parse(text);
+  }
+  return JSON.parse(new TextDecoder().decode(buf));
 }
 
 async function putObject(env, path, body, contentType) {

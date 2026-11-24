@@ -87,7 +87,7 @@ const WEIXIN_CLOUD_HISTORY_HEAD_TOKEN = "__AI_PHONE_WX_SLOT_HEAD__";
 const WEIXIN_CLOUD_MAX_DEPTH_SLOTS = 48;
 const WEIXIN_CLOUD_CHAT_APP_TAGS = ["chat", "text"];
 const DEFAULT_MESSAGE_LIMIT = 80;
-const REALTIME_PULL_INTERVAL_MS = 8000;
+const REALTIME_PULL_INTERVAL_MS = 20000;
 const LOCAL_UPLOAD_FLUSH_DELAY_MS = 500;
 const RUNTIME_CONFIG_SYNC_DEBOUNCE_MS = 3000;
 const RUNTIME_AUTO_SYNC_THROTTLE_MS = 60 * 60 * 1000;
@@ -1029,10 +1029,15 @@ export async function syncWeixinBotRuntimeToCloud(
   const snapshot = await buildWeixinCloudRuntimeSnapshot(botId, { messageLimit: options?.messageLimit });
   const path = runtimeSnapshotPath(snapshot.bot.id);
   const json = JSON.stringify(snapshot, null, 2);
-  const bytes = new TextEncoder().encode(json).byteLength;
+  const rawBytes = new TextEncoder().encode(json).byteLength;
+  // 运行包是云端助手每分钟一次的下载对象，1200+ KB 的明文对它来说太贵：
+  // 上传前 gzip 压缩，出网流量按压缩后的字节计。旧版明文包保持可读（函数侧按魔数判断）。
+  const compressed = await gzipText(json);
+  const useGzip = Boolean(compressed && compressed.size > 0 && compressed.size < rawBytes * 0.92);
+  const bytes = useGzip ? compressed!.size : rawBytes;
 
   await ensureBucket(cloudConfig);
-  await putObject(cloudConfig, path, json, "application/json");
+  await putObject(cloudConfig, path, useGzip ? compressed! : json, useGzip ? "application/gzip" : "application/json");
   await updateRuntimeIndex(cloudConfig, {
     botId: snapshot.bot.id,
     characterId: snapshot.character.id,
@@ -1318,7 +1323,7 @@ export async function pullWeixinCloudMessagesFromCloud(
     const objects: Awaited<ReturnType<typeof listObjects>> = [];
     try {
       const scanFull = options?.scan !== "latest";
-      for (let offset = 0; offset < 10_000; offset += limit) {
+      for (let offset = 0; offset < (scanFull ? 800 : limit); offset += limit) {
         const page = await listObjects(cloudConfig, prefix, limit, { column: "created_at", order: "desc" }, offset);
         objects.push(...page);
         if (page.length < limit) break;
@@ -1407,8 +1412,8 @@ export function startWeixinCloudRealtimeSync(): () => void {
   };
 
   // 全量翻页扫描的节流：常规轮询只看最新页（整页全新会自动续翻），
-  // 启动、回前台、以及每 10 分钟做一次全量，兜历史坑
-  const FULL_SCAN_INTERVAL_MS = 10 * 60 * 1000;
+  // 启动、回前台、以及每 60 分钟做一次全量，兜历史坑
+  const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
   let lastFullScanAt = 0;
 
   const pullNow = async (force = false, deep = false) => {
@@ -1421,7 +1426,7 @@ export function startWeixinCloudRealtimeSync(): () => void {
     // 保存 promise 而不只是布尔：运行包同步要能等这一轮拉取落库（见 syncRuntimesNow）。
     const running = (async () => {
       try {
-        const result = await pullWeixinCloudMessagesFromCloud({ limitPerBot: 200, scan });
+        const result = await pullWeixinCloudMessagesFromCloud({ limitPerBot: 80, scan });
         if (scan === "full") lastFullScanAt = Date.now();
         if (result.added > 0) dispatchPulledSessions(result.sessionIds);
         if (result.errors.length > 0) {
@@ -1790,6 +1795,19 @@ function encodeConfigCode(json: string): string {
 
 function runtimeSnapshotPath(botId: string): string {
   return `${WEIXIN_CLOUD_PREFIX}/runtime/${sanitizePathPart(botId)}.json`;
+}
+
+/** 把文本压成 gzip Blob。环境不支持 CompressionStream 时返回 null，调用方回退成明文上传。 */
+async function gzipText(text: string): Promise<Blob | null> {
+  try {
+    const CS = (globalThis as unknown as { CompressionStream?: new (format: string) => TransformStream<Uint8Array, Uint8Array> }).CompressionStream;
+    if (typeof CS !== "function") return null;
+    const stream = new Blob([text]).stream().pipeThrough(new CS("gzip"));
+    const blob = await new Response(stream).blob();
+    return blob.size > 0 ? blob : null;
+  } catch {
+    return null;
+  }
 }
 
 function sanitizePathPart(value: string): string {

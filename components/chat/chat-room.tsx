@@ -715,6 +715,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }, ref) {
     const [inputText, setInputText] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    // 输入框非受控：真值只存 inputValueRef，inputText 退化成 200ms 的镜像，
+    // 仅供按钮文案/联想开关使用。打字不触发 React 重渲染（主线程卡顿的主因）。
+    const inputValueRef = useRef("");
+    const inputSyncTimerRef = useRef<number | null>(null);
 
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
@@ -733,19 +737,25 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     };
 
     const appendText = useCallback((text: string, options?: { focus?: boolean }) => {
-        setInputText(prev => prev + text);
+        const nextText = (inputValueRef.current || "") + text;
+        inputValueRef.current = nextText;
+        const ta = textareaRef.current;
+        if (ta) ta.value = nextText;
+        setInputText(nextText);
         requestAnimationFrame(() => {
-            const ta = textareaRef.current;
-            if (!ta) return;
-            ta.style.height = "auto";
-            ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
-            if (options?.focus !== false) ta.focus();
+            const el = textareaRef.current;
+            if (!el) return;
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 120) + "px";
+            if (options?.focus !== false) el.focus();
         });
     }, []);
 
     useImperativeHandle(ref, () => ({
         appendText,
         clear: () => {
+            inputValueRef.current = "";
+            if (textareaRef.current) textareaRef.current.value = "";
             setInputText("");
             resetTextareaHeight();
         },
@@ -757,9 +767,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             onStopGeneration();
             return;
         }
-        const trimmed = inputText.trim();
+        const trimmed = (inputValueRef.current || "").trim();
         if (!trimmed) return;
         if (!onSendText(trimmed)) return;
+        inputValueRef.current = "";
+        if (textareaRef.current) textareaRef.current.value = "";
         setInputText("");
         resetTextareaHeight();
         onClosePanels();
@@ -826,6 +838,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     characterIds={suggestCharacterIds}
                     onSend={(name, url) => {
                         onSendSticker(name, url);
+                        inputValueRef.current = "";
+                        if (textareaRef.current) textareaRef.current.value = "";
                         setInputText("");
                         resetTextareaHeight();
                     }}
@@ -835,12 +849,20 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             <textarea
                 ref={textareaRef}
                 rows={1}
-                value={inputText}
+                defaultValue=""
                 onChange={e => {
-                    setInputText(e.target.value);
-                    setSuggestClosed(false);
-                    e.target.style.height = "auto";
-                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                    const el = e.target;
+                    inputValueRef.current = el.value;
+                    // 只在停止输入 200ms 后同步一次 state：打字期间零渲染
+                    if (inputSyncTimerRef.current !== null) window.clearTimeout(inputSyncTimerRef.current);
+                    inputSyncTimerRef.current = window.setTimeout(() => {
+                        setInputText(inputValueRef.current);
+                        setSuggestClosed(false);
+                    }, 200);
+                    requestAnimationFrame(() => {
+                        el.style.height = "auto";
+                        el.style.height = Math.min(el.scrollHeight, 120) + "px";
+                    });
                 }}
                 onFocus={(e) => {
                     if (panelOpen) {
@@ -917,11 +939,13 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                         onPointerDown={(e) => e.preventDefault()}
                         tabIndex={-1}
                         onClick={() => {
-                            const trimmed = inputText.trim();
+                            const trimmed = (inputValueRef.current || "").trim();
                             // 输入框已有文字：发送输入框内容并立即触发模型回复（一次按键完成），
                             // 避免「打完字却忘记发送」；没文字时才只触发 AI 主动回复
                             if (!inputLocked && trimmed) {
                                 if (!onSendText(trimmed, { autoReply: true })) return;
+                                inputValueRef.current = "";
+                                if (textareaRef.current) textareaRef.current.value = "";
                                 setInputText("");
                                 resetTextareaHeight();
                             } else {
@@ -1000,6 +1024,8 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     const [inputText, setInputText] = useState("");
     const inputTextRef = useRef("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    // 非受控：真值在 inputTextRef，inputText 只是 200ms 镜像（打字期间零渲染）
+    const inputSyncTimerRef = useRef<number | null>(null);
 
     const resetTextareaHeight = () => {
         if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -1014,6 +1040,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
 
     const setTextAndResize = useCallback((text: string) => {
         inputTextRef.current = text;
+        if (textareaRef.current) textareaRef.current.value = text;
         setInputText(text);
         requestAnimationFrame(resizeTextarea);
     }, [resizeTextarea]);
@@ -1021,6 +1048,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     const appendText = useCallback((text: string, options?: { focus?: boolean }) => {
         const nextText = inputTextRef.current + text;
         inputTextRef.current = nextText;
+        if (textareaRef.current) textareaRef.current.value = nextText;
         setInputText(nextText);
         requestAnimationFrame(() => {
             resizeTextarea();
@@ -1031,6 +1059,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     useImperativeHandle(ref, () => ({
         clear: () => {
             inputTextRef.current = "";
+            if (textareaRef.current) textareaRef.current.value = "";
             setInputText("");
             resetTextareaHeight();
         },
@@ -1059,12 +1088,18 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
             <textarea
                 ref={textareaRef}
                 rows={1}
-                value={inputText}
+                defaultValue=""
                 onChange={e => {
-                    inputTextRef.current = e.target.value;
-                    setInputText(e.target.value);
-                    e.target.style.height = "auto";
-                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                    const el = e.target;
+                    inputTextRef.current = el.value;
+                    if (inputSyncTimerRef.current !== null) window.clearTimeout(inputSyncTimerRef.current);
+                    inputSyncTimerRef.current = window.setTimeout(() => {
+                        setInputText(inputTextRef.current);
+                    }, 200);
+                    requestAnimationFrame(() => {
+                        el.style.height = "auto";
+                        el.style.height = Math.min(el.scrollHeight, 120) + "px";
+                    });
                 }}
                 onFocus={(e) => {
                     if (showEmojiPanel) {
