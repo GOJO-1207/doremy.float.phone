@@ -3325,7 +3325,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Stored (prompt): [XX向YY发起了语音通话] / [我向XX发起了语音通话]
     // UI: XX向群聊发起了视频通话 / 你向XX发起了语音通话 / XX向你发起了语音通话
     const formatSysMsgForUI = (content: string, msg?: ChatMessage): string => {
-        let text = content;
+        // 防御：缺 content 的旧系统消息会让渲染整页崩，统一按空串处理。
+        let text = typeof content === "string" ? content : "";
         const charN = character?.name || "对方";
         const userN = userIdentity?.name;
         // Call initiation: [我向XX发起了语音/视频通话]

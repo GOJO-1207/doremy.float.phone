@@ -588,11 +588,14 @@ const HIDDEN_SYSTEM_INSTRUCTION_RE = /<hidden-system>([\s\S]*?)<\/hidden-system>
 
 /** 系统事件在聊天界面中可见的小横条文案；隐藏标签中的提示词绝不渲染。 */
 export function getSystemInstructionDisplayContent(content: string): string {
+    // 防御：老数据里的系统指令消息可能没有 content，直接 replace 会抛 TypeError。
+    if (typeof content !== "string") return "";
     return content.replace(HIDDEN_SYSTEM_INSTRUCTION_RE, "").replace(/\n{2,}/g, "\n").trim();
 }
 
 /** 取出供角色与短期记忆读取的详细内容；有隐藏标签时不重复带上外层展示文案。 */
 export function getSystemInstructionPromptContent(content: string): string {
+    if (typeof content !== "string") return "";
     const hidden: string[] = [];
     content.replace(HIDDEN_SYSTEM_INSTRUCTION_RE, (_full, body: string) => {
         const normalized = body.trim();

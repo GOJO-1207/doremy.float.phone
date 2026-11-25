@@ -104,6 +104,9 @@ export class MacroEngine {
 
     /** Main entry: iteratively expand all macros (innermost first). */
     expand(text: string): string {
+        // 防御：预设 / 世界书 / 跨应用时间线里偶有缺 content 的脏数据，
+        // 放行 undefined 会在 expandInnermost 里抛 TypeError，整轮生成被打断（界面显示「发送失败」）。
+        if (typeof text !== "string") return "";
         const MAX_ITERATIONS = 50;
         let result = text;
         for (let i = 0; i < MAX_ITERATIONS; i++) {

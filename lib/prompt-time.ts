@@ -80,6 +80,9 @@ export function formatStoredPromptEventContent(
   content: string,
   options: { label: string; timestamp: string; timeAware?: boolean; timestampOptions?: PromptTimestampOptions },
 ): string {
+  // 防御：时间线事件（便签墙 / 小剧场 / 查手机 / 自建 APP 等）偶有正文缺失的记录，
+  // 之前直接对 undefined 调 replace 会抛 TypeError，整轮回复失败（界面显示「发送失败」）。
+  if (typeof content !== "string") return "";
   const enabled = resolvePromptTimeAware(options.timeAware);
   if (!enabled) return stripPromptEventTimestamps(content);
 

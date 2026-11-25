@@ -3,6 +3,8 @@ export function containsChinese(text: string): boolean {
 }
 
 export function normalizeBilingualTextInput(text: string): string {
+    // 防御：富媒体消息的正文可能为空，双语展示层不能因此整页报错。
+    if (typeof text !== "string") return "";
     return text.replace(/\\r\\n|\\n|\\r/g, "\n");
 }
 
