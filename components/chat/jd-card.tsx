@@ -144,8 +144,12 @@ function NoteLine({ note, variant }: { note?: string; variant: "detail" | "surpr
     variant === "surprise"
       ? { fontSize: 11, color: "#9b8a80", lineHeight: 1.5 }
       : { fontSize: 11.5, color: "var(--c-text)", lineHeight: 1.5 };
+  const bar =
+    variant === "surprise"
+      ? { borderLeft: `3px solid ${CHEESE}`, paddingLeft: 9 }
+      : {};
   return (
-    <div style={{ marginTop: 8, ...style }}>
+    <div style={{ marginTop: 8, ...style, ...bar }}>
       <div>备注</div>
       <div>{note}</div>
     </div>
