@@ -137,17 +137,17 @@ function ItemLines({ items }: { items?: JdCardItem[] }) {
   );
 }
 
-/** 备注：普通文字，不加框 */
-function NoteLine({ note }: { note?: string }) {
+/** 备注：普通文字，不加框；字号颜色对齐同卡里的地址行 */
+function NoteLine({ note, variant }: { note?: string; variant: "detail" | "surprise" }) {
   if (!note) return null;
+  const style =
+    variant === "surprise"
+      ? { fontSize: 11, color: "#9b8a80", lineHeight: 1.5 }
+      : { fontSize: 11.5, color: "var(--c-text)", lineHeight: 1.5 };
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 10.5, color: "var(--c-text)", opacity: 0.6, letterSpacing: 1, marginBottom: 2 }}>
-        备注
-      </div>
-      <div style={{ fontSize: 12.5, color: "var(--c-text-title)", fontStyle: "italic", lineHeight: 1.6 }}>
-        {note}
-      </div>
+    <div style={{ marginTop: 8, ...style }}>
+      <div>备注</div>
+      <div>{note}</div>
     </div>
   );
 }
@@ -282,7 +282,7 @@ function DetailCard({ data }: { data: JdCardData }) {
         </div>
       ) : null}
 
-      <NoteLine note={data.note} />
+      <NoteLine note={data.note} variant="detail" />
       <ActionButtons data={data} />
     </div>
   );
@@ -324,7 +324,7 @@ function SurpriseCard({ data }: { data: JdCardData }) {
           ) : null}
         </div>
 
-        <NoteLine note={data.note} />
+        <NoteLine note={data.note} variant="surprise" />
 
         {data.address ? (
           <div style={{ marginTop: 9, fontSize: 11, color: "#9b8a80", lineHeight: 1.5 }}>
