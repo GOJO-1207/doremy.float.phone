@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 /**
- * 京东卡（海盐芝士配色）：五条悟可以自己挑「详细卡 / 惊喜卡」。
+ * 京东卡（海盐芝士配色 · 蓝色主淡黄辅）：五条悟可以自己挑「详细卡 / 惊喜卡」。
  * 用法是在聊天正文里写一个围栏块，渲染层会把它变成卡片并从正文里剥掉：
  *
  * ```jd-card
@@ -36,20 +36,20 @@ export type JdCardData = {
 
 const ORDER_URL = "https://order.jd.com/center/list.action";
 
-/** 海盐芝士：奶油芝士黄 + 海盐蓝灰 + 温白 */
+/** 海盐芝士色卡：海盐蓝为主，芝士奶黄为辅 */
 const C = {
-  cheese: "#C79A4E",
-  cheeseDeep: "#9C6F22",
-  cheeseSoft: "#F7E9C9",
-  cheeseBar: "#E6C98D",
-  salt: "#7FA2BE",
-  saltDeep: "#4E7B9C",
-  saltSoft: "#E6EFF6",
-  cream: "#FBF7EC",
-  ink: "#3D3A33",
-  inkSoft: "#8A8579",
-  line: "#E7DFCC",
-  shadow: "rgba(160,150,120,0.16)",
+  sea0: "#E7F1F7",
+  sea1: "#BFD8E6",
+  sea2: "#9EB7C6",
+  seaDeep: "#5E8398",
+  seaInk: "#46697D",
+  cream: "#FFF2D9",
+  creamSoft: "#FFF8EA",
+  creamLine: "#EFE2C9",
+  ink: "#35505E",
+  inkSoft: "#7C95A4",
+  line: "#E4EFF5",
+  shadow: "rgba(158,183,198,0.34)",
 };
 
 function normalizeJdCard(raw: unknown): JdCardData | null {
@@ -105,11 +105,28 @@ export function extractJdCards(text: string): { cards: JdCardData[]; rest: strin
 
 /** 海盐颗粒：细小的白点与蓝灰点，铺在卡片底色上 */
 const SALT_SPECKLE =
-  "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.95) 0 1.6px, transparent 2.2px)," +
-  "radial-gradient(circle at 72% 8%, rgba(127,162,190,0.35) 0 1.4px, transparent 2px)," +
-  "radial-gradient(circle at 88% 40%, rgba(255,255,255,0.9) 0 1.5px, transparent 2.1px)," +
-  "radial-gradient(circle at 30% 66%, rgba(127,162,190,0.28) 0 1.3px, transparent 1.9px)," +
-  "radial-gradient(circle at 62% 88%, rgba(255,255,255,0.85) 0 1.4px, transparent 2px)";
+  "radial-gradient(circle at 16% 14%, rgba(255,255,255,0.9) 0 1.6px, transparent 2.2px)," +
+  "radial-gradient(circle at 74% 9%, rgba(158,183,198,0.35) 0 1.4px, transparent 2px)," +
+  "radial-gradient(circle at 90% 44%, rgba(255,255,255,0.85) 0 1.5px, transparent 2.1px)," +
+  "radial-gradient(circle at 32% 72%, rgba(158,183,198,0.25) 0 1.3px, transparent 1.9px)," +
+  "radial-gradient(circle at 60% 90%, rgba(255,255,255,0.8) 0 1.4px, transparent 2px)";
+
+/** 色卡上那颗四角星，白芯带一点海盐蓝的光 */
+function Sparkle({ size = 14, opacity = 0.9 }: { size?: number; opacity?: number }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        opacity,
+        background: "#fff",
+        clipPath: "polygon(50% 0%, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0% 50%, 42% 42%)",
+        filter: "drop-shadow(0 0 5px rgba(191,216,230,0.95))",
+      }}
+    />
+  );
+}
 
 function NoteBlock({ note }: { note?: string }) {
   if (!note) return null;
@@ -117,30 +134,24 @@ function NoteBlock({ note }: { note?: string }) {
     <div
       style={{
         marginTop: 10,
-        background: `linear-gradient(180deg, ${C.cheeseSoft}99, ${C.saltSoft}77)`,
-        borderRadius: 10,
+        background: C.creamSoft,
+        borderRadius: 11,
         padding: "7px 10px 8px",
-        border: `1px solid ${C.line}`,
+        border: `1px solid ${C.creamLine}`,
       }}
     >
-      <div style={{ fontSize: 10, letterSpacing: 1, color: C.cheeseDeep, opacity: 0.85, marginBottom: 2 }}>
-        备注
-      </div>
-      <div style={{ fontSize: 12, lineHeight: 1.65, color: C.ink, fontStyle: "italic", opacity: 0.9 }}>
-        {note}
-      </div>
+      <div style={{ fontSize: 10, letterSpacing: 1.2, color: "#A08A5F", marginBottom: 2 }}>备注</div>
+      <div style={{ fontSize: 12, lineHeight: 1.65, color: C.seaInk, fontStyle: "italic" }}>{note}</div>
     </div>
   );
 }
 
-function MenuRow({ label, value, strong }: { label: string; value?: string; strong?: boolean }) {
+function MenuRow({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 5 }}>
       <span style={{ color: C.inkSoft, fontSize: 11 }}>{label}</span>
-      <span style={{ color: strong ? C.cheeseDeep : C.ink, fontSize: 11, fontWeight: strong ? 600 : 500 }}>
-        {value}
-      </span>
+      <span style={{ color: C.ink, fontSize: 11, fontWeight: 500 }}>{value}</span>
     </div>
   );
 }
@@ -174,7 +185,7 @@ function ItemLines({ items }: { items?: JdCardItem[] }) {
 
 function ActionButtons({ data, compact }: { data: JdCardData; compact?: boolean }) {
   const href = data.link || ORDER_URL;
-  const shipped = Boolean(data.status && /收货|运输|派送|配送|已发货/.test(data.status));
+  const shipped = Boolean(data.status && /收货|运输|派送|配送|已发货|已完成|已签收/.test(data.status));
   return (
     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
       <a
@@ -186,11 +197,11 @@ function ActionButtons({ data, compact }: { data: JdCardData; compact?: boolean 
           textAlign: "center",
           padding: compact ? "8px 0" : "9px 0",
           borderRadius: 999,
-          background: `linear-gradient(135deg, ${C.cheese}, ${C.salt})`,
+          background: `linear-gradient(135deg, ${C.sea2}, ${C.seaDeep})`,
           color: "#fff",
           fontSize: 13,
           fontWeight: 600,
-          letterSpacing: 0.2,
+          letterSpacing: 0.3,
           textDecoration: "none",
           boxShadow: `0 6px 16px ${C.shadow}`,
         }}
@@ -207,12 +218,12 @@ function ActionButtons({ data, compact }: { data: JdCardData; compact?: boolean 
             textAlign: "center",
             padding: compact ? "8px 0" : "9px 0",
             borderRadius: 999,
-            background: C.saltSoft,
-            color: C.saltDeep,
+            background: C.creamSoft,
+            color: C.seaDeep,
             fontSize: 13,
             fontWeight: 500,
             textDecoration: "none",
-            border: `1px solid ${C.line}`,
+            border: `1px solid ${C.creamLine}`,
           }}
         >
           查订单/物流
@@ -225,8 +236,8 @@ function ActionButtons({ data, compact }: { data: JdCardData; compact?: boolean 
 function DetailCard({ data }: { data: JdCardData }) {
   const isPending = Boolean(data.pay_left);
   const isCanceled = /已取消|已关闭/.test(data.status || "");
-  const statusColor = isCanceled ? C.inkSoft : isPending ? C.cheeseDeep : C.saltDeep;
-  const statusBg = isCanceled ? C.cream : isPending ? C.cheeseSoft : C.saltSoft;
+  const statusColor = isCanceled ? C.inkSoft : isPending ? C.seaInk : C.seaDeep;
+  const statusBg = isCanceled ? "#F3F7F9" : isPending ? C.cream : C.sea0;
   const statusText = data.pay_left ? `${data.status} ${data.pay_left}` : data.status;
   /** 物流那种长文案（「运输中 重庆分拣中心 → 大足营业部」）单独占一行，别把店铺名挤掉 */
   const longStatus = Boolean(data.status && data.status.length > 9 && !data.pay_left);
@@ -235,17 +246,20 @@ function DetailCard({ data }: { data: JdCardData }) {
     <div
       style={{
         margin: "10px 0",
-        borderRadius: 18,
+        borderRadius: 20,
         padding: 1,
-        background: `linear-gradient(150deg, ${C.cheeseBar}66, ${C.salt}44 60%, ${C.cheeseSoft})`,
-        boxShadow: `0 10px 26px ${C.shadow}`,
+        background: `linear-gradient(150deg, ${C.sea1}, ${C.cream} 52%, ${C.sea1})`,
+        boxShadow: `0 12px 30px ${C.shadow}`,
       }}
     >
       <div
         style={{
-          borderRadius: 17,
+          borderRadius: 19,
           padding: "13px 14px 14px",
-          background: `linear-gradient(165deg, #FFFDF7, ${C.cream} 55%, #F4F8FB), ${SALT_SPECKLE}`,
+          background:
+            "radial-gradient(120% 78% at 0% 0%, rgba(255,242,217,0.6) 0%, rgba(255,242,217,0) 54%)," +
+            "linear-gradient(165deg, #FFFFFF 0%, #F5FBFD 56%, #E8F3F9 100%)," +
+            SALT_SPECKLE,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -254,12 +268,12 @@ function DetailCard({ data }: { data: JdCardData }) {
               style={{
                 fontSize: 10.5,
                 fontWeight: 700,
-                color: C.cheeseDeep,
-                background: C.cheeseSoft,
-                border: `1px solid ${C.cheeseBar}`,
+                color: "#8C7749",
+                background: C.cream,
+                border: `1px solid ${C.creamLine}`,
                 borderRadius: 6,
                 padding: "1px 6px",
-                letterSpacing: 0.5,
+                letterSpacing: 0.6,
                 flexShrink: 0,
               }}
             >
@@ -325,11 +339,11 @@ function DetailCard({ data }: { data: JdCardData }) {
           <span style={{ fontSize: 11, color: C.inkSoft }}>{amountLabel}</span>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             {data.orig ? (
-              <span style={{ fontSize: 11, color: C.inkSoft, textDecoration: "line-through", opacity: 0.8 }}>
+              <span style={{ fontSize: 11, color: C.inkSoft, textDecoration: "line-through", opacity: 0.85 }}>
                 {data.orig}
               </span>
             ) : null}
-            <span style={{ fontSize: 21, fontWeight: 700, color: C.cheeseDeep, letterSpacing: -0.4 }}>
+            <span style={{ fontSize: 21, fontWeight: 700, color: C.seaInk, letterSpacing: -0.4 }}>
               {data.total || "—"}
             </span>
           </div>
@@ -340,12 +354,12 @@ function DetailCard({ data }: { data: JdCardData }) {
 
         {data.address ? (
           <div style={{ marginTop: 9, fontSize: 11.5, color: C.inkSoft, lineHeight: 1.55 }}>
-            <span style={{ marginRight: 4 }}>📍</span>
+            <span style={{ marginRight: 5, color: C.seaDeep, opacity: 0.75 }}>◦</span>
             {data.address}
           </div>
         ) : null}
         {data.order_id ? (
-          <div style={{ marginTop: 4, fontSize: 10.5, color: C.inkSoft, opacity: 0.72 }}>
+          <div style={{ marginTop: 4, fontSize: 10.5, color: C.inkSoft, opacity: 0.8 }}>
             订单号 {data.order_id}
           </div>
         ) : null}
@@ -353,7 +367,7 @@ function DetailCard({ data }: { data: JdCardData }) {
         <NoteBlock note={data.note} />
         <ActionButtons data={data} />
         {/收货|运输|派送|配送|已发货|已完成|已签收/.test(data.status || "") ? null : (
-          <div style={{ marginTop: 7, fontSize: 10.5, color: C.inkSoft, opacity: 0.75, textAlign: "center" }}>
+          <div style={{ marginTop: 7, fontSize: 10.5, color: C.inkSoft, textAlign: "center" }}>
             付款在你手机上完成，我这边不碰密码
           </div>
         )}
@@ -369,32 +383,34 @@ function SurpriseCard({ data }: { data: JdCardData }) {
         margin: "10px 0",
         borderRadius: 22,
         padding: 1.5,
-        background: `linear-gradient(145deg, ${C.cheeseBar}, #DCEAF3 46%, ${C.cheeseSoft})`,
-        boxShadow: `0 12px 28px ${C.shadow}`,
+        background: `linear-gradient(140deg, ${C.sea1}, ${C.cream} 48%, ${C.sea2})`,
+        boxShadow: `0 14px 32px ${C.shadow}`,
       }}
     >
       <div
         style={{
           borderRadius: 21,
           padding: "15px 16px 15px",
-          background: `linear-gradient(168deg, #FFFBEF, #F5FAFD 58%, #FAF4E4), ${SALT_SPECKLE}`,
+          background:
+            "radial-gradient(95% 68% at 2% 0%, rgba(255,246,228,0.55) 0%, rgba(255,246,228,0) 52%)," +
+            "linear-gradient(168deg, #FBFEFF 0%, #E7F2F8 55%, #DBE9F2 100%)," +
+            SALT_SPECKLE,
           position: "relative",
           overflow: "hidden",
         }}
       >
-        {/* 海盐颗粒上压一层极淡的斜光 */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "linear-gradient(120deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 42%)",
-            pointerEvents: "none",
-          }}
-        />
+        {/* 右上角一颗大白星，跟色卡上那颗一样 */}
+        <div style={{ position: "absolute", top: 12, right: 14, opacity: 0.95 }}>
+          <Sparkle size={22} />
+        </div>
+        <div style={{ position: "absolute", top: 44, right: 36, opacity: 0.7 }}>
+          <Sparkle size={9} />
+        </div>
+
         <div style={{ position: "relative" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: C.cheeseDeep }}>
-            <span style={{ fontSize: 13 }}>✦</span>
-            <span style={{ letterSpacing: 0.6 }}>悄悄给你放好了</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: C.seaDeep }}>
+            <Sparkle size={10} opacity={0.85} />
+            <span style={{ letterSpacing: 1 }}>悄悄给你放好了</span>
           </div>
 
           <div style={{ marginTop: 10, display: "flex", alignItems: "flex-end", gap: 8 }}>
@@ -402,7 +418,7 @@ function SurpriseCard({ data }: { data: JdCardData }) {
               style={{
                 fontSize: 32,
                 fontWeight: 800,
-                color: C.cheeseDeep,
+                color: C.seaInk,
                 letterSpacing: -1.2,
                 lineHeight: 1,
               }}
@@ -419,8 +435,8 @@ function SurpriseCard({ data }: { data: JdCardData }) {
           <NoteBlock note={data.note} />
 
           {data.address ? (
-            <div style={{ marginTop: 9, fontSize: 11, color: C.inkSoft, lineHeight: 1.55, opacity: 0.9 }}>
-              <span style={{ marginRight: 4 }}>📍</span>
+            <div style={{ marginTop: 9, fontSize: 11, color: C.inkSoft, lineHeight: 1.55 }}>
+              <span style={{ marginRight: 5, color: C.seaDeep, opacity: 0.75 }}>◦</span>
               {data.address}
             </div>
           ) : null}
