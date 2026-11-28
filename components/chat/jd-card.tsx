@@ -73,11 +73,45 @@ function normalizeJdCard(raw: unknown): JdCardData | null {
 }
 
 const JD_CARD_RX = /```(?:jd-card|jd_card|京东卡|jingdong-card)\s*\n([\s\S]*?)```/gi;
+/** 语言名没写对（写成 json / 什么都不写）但内容是卡片的围栏 */
+const ANY_JSON_FENCE_RX = /```(?:json)?\s*\n([\s\S]*?)```/gi;
 
-/** 从消息正文里抽出所有京东卡块，返回卡片数据与去掉块之后的正文。 */
+/**
+ * 这段 JSON 像不像一张京东卡（用于兜底，防止他把裸 JSON 直接发出来）。
+ *
+ * 判据刻意收得很紧，宁可漏、不可误伤：
+ * 必须是对象、type 恰好是 detail / surprise、并且带 order_id 或 total。
+ * 三者缺一，就按普通文字处理——否则聊天里任何一段 JSON 都会被吃成卡片。
+ */
+function looksLikeJdCardRaw(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const o = raw as Record<string, unknown>;
+  if (o.type !== "detail" && o.type !== "surprise") return false;
+  return typeof o.order_id === "string" || typeof o.total === "string";
+}
+
+function parseCardBody(body: string): JdCardData | null {
+  try {
+    const raw = JSON.parse(String(body).trim());
+    if (!looksLikeJdCardRaw(raw)) return null;
+    return normalizeJdCard(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从消息正文里抽出所有京东卡块，返回卡片数据与去掉块之后的正文。
+ *
+ * 三层认卡顺序：
+ * ① 正牌围栏 ```jd-card / ```京东卡 …；
+ * ② 围栏写错语言名（```json 或素 ```），但内容是卡；
+ * ③ 整条消息就是一段裸 JSON（五条悟偶尔忘了加围栏）。
+ * ②③ 都要求「像一张卡」，正文里夹着说人话的 JSON 不会被误吃。
+ */
 export function extractJdCards(text: string): { cards: JdCardData[]; rest: string } {
   const cards: JdCardData[] = [];
-  const rest = text.replace(JD_CARD_RX, (_m, body: string) => {
+  let rest = text.replace(JD_CARD_RX, (_m, body: string) => {
     try {
       const parsed = normalizeJdCard(JSON.parse(String(body).trim()));
       if (parsed) cards.push(parsed);
@@ -86,6 +120,27 @@ export function extractJdCards(text: string): { cards: JdCardData[]; rest: strin
     }
     return "";
   });
+
+  if (!cards.length) {
+    rest = rest.replace(ANY_JSON_FENCE_RX, (m: string, body: string) => {
+      const parsed = parseCardBody(body);
+      if (!parsed) return m;
+      cards.push(parsed);
+      return "";
+    });
+  }
+
+  if (!cards.length) {
+    const trimmed = rest.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const parsed = parseCardBody(trimmed);
+      if (parsed) {
+        cards.push(parsed);
+        rest = "";
+      }
+    }
+  }
+
   return { cards, rest: rest.replace(/\n{3,}/g, "\n\n").trim() };
 }
 
