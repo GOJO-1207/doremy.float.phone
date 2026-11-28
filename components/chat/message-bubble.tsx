@@ -27,6 +27,7 @@ import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
 import { JdCard, extractJdCards } from "@/components/chat/jd-card";
+import { LuckinCard, extractLuckinCards } from "@/components/chat/luckin-card";
 import { payWithWalletBalance } from "@/lib/wallet-storage";
 import { formatShoppingPaymentRequestHistory } from "@/lib/shopping-payment-request";
 import { toCustomAppIconId } from "@/lib/custom-app-types";
@@ -577,10 +578,14 @@ function MarkdownTextContent({
     // Strip [音乐:xxx] and tool tags, collapse newlines
     const rawCleaned = normalizeTextBubbleContent(content);
     // 京东卡（五条悟自己挑详细卡 / 惊喜卡）→ 抽出来单独渲染，正文里剥掉围栏块
-    const jdSplit = extractJdCards(rawCleaned);
+    // 瑞幸卡先抽：它的兜底判据是「没有 type 字段」，不会跟京东卡抢；但要把顺序放在京东前面，
+    // 否则京东的 ```json 兜底会先把瑞幸卡块吃掉。
+    const lkSplit = extractLuckinCards(rawCleaned);
+    const luckinCards = lkSplit.cards;
+    const jdSplit = extractJdCards(lkSplit.rest);
     const jdCards = jdSplit.cards;
     const cleaned = jdSplit.rest.trim();
-    if (!cleaned && jdCards.length === 0) return null;
+    if (!cleaned && jdCards.length === 0 && luckinCards.length === 0) return null;
 
     // 支付类 scheme（微信扫码付 / 支付宝等）→ 渲染成支付卡片，从正文剥离原始串
     const payUrls = extractPaySchemeUrls(cleaned);
@@ -601,7 +606,7 @@ function MarkdownTextContent({
         // Simple path: pure markdown — extract styles only from non-html content
         const { styles, body } = extractStyles(cleaned);
         const mdCleaned = wrapQuotedDialogue(linkifyBareUrls(stripPaySchemeUrls(body.trim())));
-        if (!mdCleaned && !styles && payUrls.length === 0 && jdCards.length === 0) return null;
+        if (!mdCleaned && !styles && payUrls.length === 0 && jdCards.length === 0 && luckinCards.length === 0) return null;
         return (
             <div className="chat-markdown hide-scrollbar break-words" ref={containerRef}>
                 {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
@@ -611,6 +616,7 @@ function MarkdownTextContent({
                     </ReactMarkdown>
                 )}
                 {jdCards.map((c, i) => <JdCard key={`jd-${i}`} data={c} />)}
+                {luckinCards.map((c, i) => <LuckinCard key={`lk-${i}`} data={c} />)}
                 {payUrls.map((u, i) => <ScanPayCard key={`pay-${i}`} url={u} />)}
             </div>
         );
@@ -638,6 +644,7 @@ function MarkdownTextContent({
                 );
             })}
             {jdCards.map((c, i) => <JdCard key={`jd-${i}`} data={c} />)}
+            {luckinCards.map((c, i) => <LuckinCard key={`lk-${i}`} data={c} />)}
             {payUrls.map((u, i) => <ScanPayCard key={`pay-${i}`} url={u} />)}
         </div>
     );
