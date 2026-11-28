@@ -1526,6 +1526,14 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
     }
     emitChatPluginEvent("message.persisted", { message: newMsg });
 
+    // 「他发了消息就弹一下」：只在页面不在前台时把这条**已经进聊天室的消息**广播成通知。
+    // 不生成文本、不改内容，所以通知与聊天室永远一致；前台不弹（她正看着）。
+    if (newMsg.role === "assistant" && typeof window !== "undefined") {
+        void import("./chat-message-push")
+            .then(m => m.notifyAssistantMessage(newMsg))
+            .catch(() => undefined);
+    }
+
     return newMsg;
 }
 
