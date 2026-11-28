@@ -19,9 +19,37 @@ function cleanup(nowMs: number) {
   for (const [id, at] of notified) if (nowMs - at > DEDUPE_MS) notified.delete(id);
 }
 
-function isPageHidden(): boolean {
-  if (typeof document === "undefined") return false;
-  return document.visibilityState !== "visible";
+// 最近一次「人在屏幕前」的信号。壳里的 WebView 不一定老实上报 hidden，
+// 所以除了 visibilityState，再叠一层「多久没碰屏幕」兜底。
+let lastInteractionAt = 0;
+let signalsBound = false;
+
+const IDLE_AS_BACKGROUND_MS = 45_000;
+
+function bindSignals() {
+  if (signalsBound || typeof window === "undefined") return;
+  signalsBound = true;
+  const touch = () => { lastInteractionAt = Date.now(); };
+  for (const evt of ["pointerdown", "touchstart", "keydown", "wheel", "scroll"]) {
+    window.addEventListener(evt, touch, { passive: true, capture: true });
+  }
+  document.addEventListener("visibilitychange", touch, { passive: true });
+  touch();
+}
+
+/** 返回「算不算在后台」以及判断依据，依据会写进观测行 */
+export function backgroundReason(): { hidden: boolean; detail: string } {
+  if (typeof document === "undefined") return { hidden: false, detail: "no-document" };
+  bindSignals();
+  const vis = document.visibilityState;
+  const focused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
+  const idleMs = lastInteractionAt ? Date.now() - lastInteractionAt : 0;
+  const idle = idleMs >= IDLE_AS_BACKGROUND_MS;
+  const hidden = vis !== "visible" || !focused || idle;
+  return {
+    hidden,
+    detail: `vis=${vis};focus=${focused};idle=${Math.round(idleMs / 1000)}s;${hidden ? "bg" : "fg"}`,
+  };
 }
 
 /** 去掉 [内心] 段、卡片/宏标记，只留给她看的那句话 */
@@ -43,7 +71,7 @@ async function beacon(stage: string, message: { id?: string; sessionId?: string 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         stage,
-        hidden: typeof document !== "undefined" ? document.visibilityState : "unknown",
+        hidden: backgroundReason().detail,
         sessionId: message.sessionId || "",
         messageId: message.id || "",
         ...extra,
@@ -65,7 +93,8 @@ export async function notifyAssistantMessage(message: {
     if (typeof window === "undefined") return false;
     if (message.role !== "assistant") return false;
     if (message.status === "rejected") { void beacon("skip-rejected", message); return false; }  // 被拉黑拒收的，不弹
-    if (!isPageHidden()) { void beacon("skip-visible", message); return false; }                  // 她正看着屏幕，不弹
+    const bg = backgroundReason();
+    if (!bg.hidden) { void beacon("skip-visible", message); return false; }                       // 她正看着屏幕，不弹
 
     const nowMs = Date.now();
     if (nowMs - lastNotifyAt < NOTIFY_INTERVAL_MS) { void beacon("skip-throttle", message); return false; }
@@ -103,6 +132,7 @@ export async function notifyAssistantMessage(message: {
         body: text.slice(0, 80),
         sessionId: message.sessionId || "",
         messageId: id,
+        hidden: bg.detail,
       }),
       keepalive: true,
     });
