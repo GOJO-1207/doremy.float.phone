@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { resolvePushSubject, sendPushToUser } from "@/lib/server/push-service";
-import { getSupabaseServerConfig } from "@/lib/server/supabase-rest";
+import { getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
 
 /**
  * 「他发消息了就弹一下」——客户端在角色消息落地且页面不在前台时调用。
@@ -21,10 +21,40 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({})) as {
       title?: unknown; body?: unknown; sessionId?: unknown; messageId?: unknown;
+      stage?: unknown; hidden?: unknown;
     };
+    // 观测行：客户端每次「消息落库」都会打一枪，跳过也要记，否则分不清
+    // 是「没触发」还是「触发了被规则挡掉」。表在 test-float，RLS 无策略。
+    const stage = String(body.stage ?? "send").slice(0, 24);
+    const hidden = String(body.hidden ?? "").slice(0, 24);
+    const log = async (fields: { title?: string; text?: string; sent?: number; total?: number; errors?: string }) => {
+      await supabaseRestFetch("push_notify_log", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: account.id,
+          stage,
+          hidden,
+          session_id: typeof body.sessionId === "string" ? body.sessionId.slice(0, 120) : "",
+          message_id: typeof body.messageId === "string" ? body.messageId.slice(0, 120) : "",
+          title: (fields.title ?? String(body.title ?? "")).slice(0, 80),
+          body: (fields.text ?? String(body.body ?? "")).slice(0, 200),
+          sent: fields.sent ?? -1,
+          total: fields.total ?? -1,
+          errors: (fields.errors ?? "").slice(0, 200),
+        }),
+      }).catch(() => undefined);
+    };
+
+    if (stage !== "send") {
+      await log({});
+      return NextResponse.json({ ok: true, logged: stage });
+    }
     const title = String(body.title ?? "").trim().slice(0, 40) || "小手机";
     const text = String(body.body ?? "").trim().slice(0, 160);
-    if (!text) return NextResponse.json({ ok: false, error: "body 为空" }, { status: 400 });
+    if (!text) {
+      await log({ errors: "empty-body" });
+      return NextResponse.json({ ok: false, error: "body 为空" }, { status: 400 });
+    }
 
     const sessionId = typeof body.sessionId === "string" ? body.sessionId.slice(0, 120) : "";
     const messageId = typeof body.messageId === "string" ? body.messageId.slice(0, 120) : "";
@@ -33,6 +63,7 @@ export async function POST(request: Request) {
 
     const url = new URL("/", request.url).toString();
     const result = await sendPushToUser(account.id, { title, body: text, tag, url }, resolvePushSubject(request.url));
+    await log({ title, text, sent: result.sent, total: result.total, errors: result.errors.join(" | ") });
     return NextResponse.json({
       ok: result.sent > 0,
       sent: result.sent,

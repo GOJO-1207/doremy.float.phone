@@ -35,6 +35,24 @@ function plainTextOf(raw: string): string {
     .trim();
 }
 
+async function beacon(stage: string, message: { id?: string; sessionId?: string }, extra: Record<string, unknown> = {}) {
+  try {
+    await fetch("/api/push/notify", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stage,
+        hidden: typeof document !== "undefined" ? document.visibilityState : "unknown",
+        sessionId: message.sessionId || "",
+        messageId: message.id || "",
+        ...extra,
+      }),
+      keepalive: true,
+    });
+  } catch { /* 观测失败不影响任何东西 */ }
+}
+
 export async function notifyAssistantMessage(message: {
   id?: string;
   sessionId?: string;
@@ -46,13 +64,13 @@ export async function notifyAssistantMessage(message: {
   try {
     if (typeof window === "undefined") return false;
     if (message.role !== "assistant") return false;
-    if (message.status === "rejected") return false;       // 被拉黑拒收的，不弹
-    if (!isPageHidden()) return false;                     // 她正看着屏幕，不弹
+    if (message.status === "rejected") { void beacon("skip-rejected", message); return false; }  // 被拉黑拒收的，不弹
+    if (!isPageHidden()) { void beacon("skip-visible", message); return false; }                  // 她正看着屏幕，不弹
 
     const nowMs = Date.now();
-    if (nowMs - lastNotifyAt < NOTIFY_INTERVAL_MS) return false;
+    if (nowMs - lastNotifyAt < NOTIFY_INTERVAL_MS) { void beacon("skip-throttle", message); return false; }
     const id = String(message.id || "");
-    if (id && notified.has(id)) return false;
+    if (id && notified.has(id)) { void beacon("skip-dedupe", message); return false; }
     if (id) { notified.set(id, nowMs); cleanup(nowMs); }
 
     const text = plainTextOf(String(message.content || ""))
@@ -60,6 +78,7 @@ export async function notifyAssistantMessage(message: {
         : message.mediaType === "image" ? "[图片]"
         : message.mediaType === "voice" || message.mediaType === "audio" ? "[语音]"
         : "");
+    if (!text) { void beacon("skip-empty", message); return false; }
     if (!text) return false;
 
     const session = message.sessionId
